@@ -89,6 +89,24 @@ If the outfit data is incomplete, the agent generates a simplified fit card usin
 **How does your agent decide which tool to call next?**
 <!-- Describe the logic your planning loop uses. What does it look at? What conditions change its behavior? How does it know when it's done? -->
 
+The agent follows this sequential decision flow:
+
+1. **Parse** the user's query to extract search criteria (item description, size, budget) and wardrobe context (existing pieces, style preferences).
+
+2. **Call search_listings** with the extracted parameters. Evaluate the tool's response:
+   - If results found → proceed to step 3
+   - If no results → **suggest** broader search criteria to the user and halt
+
+3. **Call suggest_outfit** using the best matching item from search results and the user's wardrobe context. Evaluate the response:
+   - If outfit generated → proceed to step 4
+   - If wardrobe is empty/insufficient → **recommend** complementary items and still proceed to step 4
+
+4. **Call create_fit_card** with the outfit suggestion and featured item to generate a shareable caption.
+
+5. **Synthesize** all three outputs into a single, polished recommendation and present to the user.
+
+**Completion condition:** The agent is done once all three tools have been successfully executed and the final output has been delivered. If search_listings fails, the agent stops and prompts the user to adjust their criteria.
+
 ---
 
 ## State Management
@@ -96,17 +114,56 @@ If the outfit data is incomplete, the agent generates a simplified fit card usin
 **How does information from one tool get passed to the next?**
 <!-- Describe how your agent stores and accesses state within a session. What data is tracked? How is it passed between tool calls? -->
 
+The agent maintains a **session state object** that persists throughout the entire interaction. Here's how data flows:
+
+**Initialize** the session state at the start of each user query with:
+- `user_query` (str): The original user message
+- `search_criteria` (dict): Extracted description, size, budget, and style preferences
+- `wardrobe` (dict): User's existing clothing items (if provided or loaded from profile)
+- `current_item` (dict): The selected item from search results
+- `outfit_suggestion` (dict): Generated outfit combination
+- `fit_card` (str): Final shareable caption
+- `error_log` (list): Any failures encountered during execution
+
+**Extract and store** search criteria from the user's query into `search_criteria`. This becomes the input for `search_listings`.
+
+**Retrieve and store** the best matching item from `search_listings` results into `current_item`. Pass this object directly to `suggest_outfit` along with the `wardrobe` data.
+
+**Capture and store** the outfit recommendation returned by `suggest_outfit` into `outfit_suggestion`. Simultaneously pass both `outfit_suggestion` and `current_item` to `create_fit_card`.
+
+**Collect and store** the fit card caption returned by `create_fit_card` into `fit_card`.
+
+**Reference the session state** at each step to check for errors. If a tool fails, **log the error** to `error_log` and conditionally branch:
+- If `search_listings` fails → halt and prompt user
+- If `suggest_outfit` fails → continue with a fallback recommendation
+- If `create_fit_card` fails → continue with a generic caption
+
+**Finalize and synthesize** all stored data (`current_item`, `outfit_suggestion`, `fit_card`) into a single polished response before presenting to the user.
+
+**Clear the session** once the interaction is complete, or **preserve it** for follow-up queries if the user asks for refinements or variations.
+
 ---
 
 ## Error Handling
+
 
 For each tool, describe the specific failure mode you're handling and what the agent does in response.
 
 | Tool | Failure mode | Agent response |
 |------|-------------|----------------|
-| search_listings | No results match the query | |
-| suggest_outfit | Wardrobe is empty | |
-| create_fit_card | Outfit input is missing or incomplete | |
+| search_listings | No results match the query | **Log error** to `error_log`. **Inform** the user: "I couldn't find items matching '[description]' under $[budget]. Try broadening your search — maybe adjust the price, size, or keywords?" **Prompt** the user to refine criteria and re-attempt the search. **Do not halt** — keep the session alive for retry. |
+| search_listings | Price/size filtering too restrictive | **Relax** one filter at a time (price +$10, expand size range). **Re-call** search_listings with adjusted parameters. **Notify** user: "Expanding search to include similar sizes/prices..." **Preserve** original constraints in `error_log` for reference. |
+| suggest_outfit | Wardrobe is empty or insufficient | **Log warning** to `error_log`. **Generate** a fallback outfit using only the `new_item` and **recommend** 2–3 complementary pieces (for example: "Your wardrobe is empty, but this tee pairs beautifully with baggy jeans and chunky sneakers — consider adding these to complete the look.") **Proceed** to Step 3 (create_fit_card) with the fallback suggestion. |
+| suggest_outfit | New item and wardrobe are incompatible (conflicting styles) | **Log conflict** to `error_log`. **Generate** an alternative outfit by re-analyzing the `new_item` with relaxed style constraints. **Explain** to user: "This piece has a different vibe than your usual style, but here's how to make it work: [outfit]." **Continue** to Step 3. |
+| create_fit_card | Outfit input is missing or incomplete | **Log** missing fields to `error_log`. **Construct** a minimal fit card using available data (e.g., just the new_item name and price if outfit details are sparse). **Use** a generic template: "Just scored [item name] for $[price]. Fresh addition to the rotation 🎯" **Return** to user with a note: "Caption generated with limited outfit details — ask me for styling tips!" |
+| create_fit_card | Caption generation fails (API/model error) | **Log** the technical error to `error_log`. **Fall back** to a plain-text summary: "[Item name] paired with [wardrobe pieces] — check it out!" **Inform** user: "Caption unavailable, but here's your outfit recommendation." **Keep session active** for potential retry or refinement. |
+
+**General recovery strategy:**
+- **Never terminate the session** on error — always offer the user a path forward (refine search, adjust budget, provide fallback recommendations).
+- **Log all errors** with timestamps and context so the user can review what went wrong.
+- **Offer explicit next steps**: "Want to try a different size?" or "Should I look for similar items in a higher price range?"
+- **Preserve state** across retries — the user shouldn't have to re-enter their wardrobe or search criteria.
+
 
 ---
 
@@ -120,6 +177,129 @@ For each tool, describe the specific failure mode you're handling and what the a
      ASCII art, a Mermaid diagram (https://mermaid.js.org/syntax/flowchart.html), or an embedded
      sketch are all fine. You'll share this diagram with an AI tool when asking it to implement
      the planning loop and each individual tool. -->
+
+
+
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            USER INPUT                                       │
+│                    Example"Find me a vintage tee under $30"                        │
+└────────────────────────────────┬────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PLANNING LOOP                                       │
+│                                                                             │
+│  1. Parse user query → extract search_criteria & wardrobe context           │
+│  2. Validate inputs → check budget, size, description validity             │
+│  3. Decide which tool to call next based on state & completion status       │
+└────────────────────────────────┬────────────────────────────────────────────┘
+                                 │
+                    ┌────────────┴────────────┐
+                    │                         │
+                    ▼                         ▼
+        ┌──────────────────────┐   ┌──────────────────────┐
+        │  SESSION STATE       │   │  ERROR LOG           │
+        │  ────────────────    │   │  ────────────────    │
+        │  user_query          │   │  timestamp           │
+        │  search_criteria     │   │  tool_name           │
+        │  wardrobe            │   │  failure_mode        │
+        │  current_item        │   │  resolution          │
+        │  outfit_suggestion   │   │                      │
+        │  fit_card            │   │                      │
+        └──────────────────────┘   └──────────────────────┘
+                    │                         │
+                    └────────────┬────────────┘
+                                 │
+        ┌────────────────────────┼────────────────────────┐
+        │                        │                        │
+        ▼                        ▼                        ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│  TOOL 1          │  │  TOOL 2          │  │  TOOL 3          │
+│ search_listings  │  │ suggest_outfit   │  │ create_fit_card  │
+│                  │  │                  │  │                  │
+│ Input:           │  │ Input:           │  │ Input:           │
+│ • description    │  │ • new_item       │  │ • outfit         │
+│ • size           │  │ • wardrobe       │  │ • new_item       │
+│ • max_price      │  │                  │  │                  │
+│                  │  │ Output:          │  │ Output:          │
+│ Output:          │  │ • outfit_list    │  │ • caption        │
+│ • listings[]     │  │ • explanations   │  │ • vibe           │
+│ • fallback       │  │ • fallback       │  │ • social_ready   │
+│                  │  │                  │  │                  │
+│ Failure modes:   │  │ Failure modes:   │  │ Failure modes:   │
+│ ✗ No results     │  │ ✗ Empty wardrobe │  │ ✗ Missing data   │
+│ ✗ Too strict     │  │ ✗ Style conflict │  │ ✗ API error      │
+│   filters        │  │                  │  │                  │
+└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
+         │                     │                     │
+         │                     │                     │
+         ▼                     ▼                     ▼
+    ┌─────────┐           ┌─────────┐           ┌─────────┐
+    │ VALIDATE │           │ VALIDATE │           │ VALIDATE │
+    │ & STORE  │           │ & STORE  │           │ & STORE  │
+    │ OUTPUT   │           │ OUTPUT   │           │ OUTPUT   │
+    └────┬────┘           └────┬────┘           └────┬────┘
+         │                     │                     │
+         └─────────────────────┼─────────────────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │   STATE UPDATED      │
+                    │   current_item ✓     │
+                    │   outfit ✓           │
+                    │   fit_card ✓         │
+                    └──────────────────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+                    ▼                     ▼
+            ┌─────────────────┐  ┌──────────────────┐
+            │ ALL TOOLS OK?   │  │  ERROR RECOVERY  │
+            │                 │  │  ────────────────│
+            │ YES ──→ Step 5  │  │  • Relax filters │
+            │  │              │  │  • Retry tool    │
+            │  NO ──→ HANDLE  │  │  • Skip tool     │
+            │       ERROR     │  │  • Fallback      │
+            └────────┬────────┘  └──────────────────┘
+                     │
+                     ▼
+         ┌───────────────────────────┐
+         │   SYNTHESIZE & PRESENT    │
+         │   ───────────────────────  │
+         │   1. Item recommendation  │
+         │   2. Styling advice       │
+         │   3. Shareable fit card   │
+         │   4. Error context (if any)
+         └───────────────────────────┘
+                     │
+                     ▼
+         ┌───────────────────────────┐
+         │  FINAL OUTPUT TO USER     │
+         │  ───────────────────────  │
+         │  "I found [item]...       │
+         │   How to wear it: [style] │
+         │   Fit card: [caption]"    │
+         └───────────────────────────┘
+                     │
+                     ▼
+         ┌───────────────────────────┐
+         │  PRESERVE OR CLEAR STATE? │
+         │  ───────────────────────  │
+         │  Follow-up query?         │
+         │  YES → Keep state         │
+         │  NO  → Clear session      │
+         └───────────────────────────┘
+```
+
+**Data Flow Summary:**
+- **User Query** → Parse & Extract → Session State (initialized)
+- **Search** Tool result → Store in `current_item` → Feed to Suggest Tool
+- **Suggest** Tool result → Store in `outfit_suggestion` → Feed to Create Tool
+- **Create** Tool result → Store in `fit_card` → Synthesize all three outputs
+- **Errors at any stage** → Log to `error_log` → Branch to recovery logic → Keep session alive
+- **Final synthesis** → Combine item + outfit + caption → Present to user
 
 ---
 
@@ -138,7 +318,32 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 **Milestone 3 — Individual tool implementations:**
 
+Implement each tool stub in `tools.py` using GitHub Copilot. For each tool:
+
+1. **Paste the tool's complete spec block** from the Tools section (What it does, Input parameters, What it returns, What happens if it fails)
+2. **Include the function signature and docstring** from `tools.py`
+3. **Request implementation** specifying: use `load_listings()` from `utils/data_loader.py` for search_listings; call Groq's llama-3.3-70b-versatile LLM for suggest_outfit and create_fit_card; return empty list (not exception) on no results; handle empty wardrobe gracefully
+4. **Review generated code** against your spec: Do parameters match? Does failure mode handling match the Error Handling table?
+5. **Write pytest tests** in `tests/test_tools.py` — one test per failure mode (e.g., `test_search_empty_results`, `test_suggest_outfit_empty_wardrobe`, `test_create_fit_card_incomplete_outfit`)
+6. **Run `pytest tests/test_tools.py`** and verify all tests pass before Milestone 4
+
+**Checkpoint:** Each of the three tools works independently. All failure modes return informative messages per the Error Handling table, not exceptions.
+
+---
+
 **Milestone 4 — Planning loop and state management:**
+
+Implement `run_agent()` in `agent.py` using GitHub Copilot:
+
+1. **Share the Planning Loop section, State Management section, and Architecture diagram** with Copilot
+2. **Request implementation** of `run_agent(user_query, wardrobe)` that: (1) initializes session dict per State Management spec, (2) calls search_listings with parsed criteria, (3) **branches** — if empty list, halt and log error; if results exist, proceed, (4) calls suggest_outfit with best result and wardrobe, (5) calls create_fit_card with outfit and item, (6) returns complete session dict
+3. **Verify branching logic:** The agent must NOT call all three tools unconditionally — it halts after search_listings if results are empty
+4. **Test with the Complete Interaction example:** Trace state at each step (Step 1 → current_item stored; Step 2 → outfit_suggestion stored; Step 3 → fit_card stored); verify values flow correctly between tools
+5. **Implement `handle_query()` in `app.py`** to map session dict keys to Gradio output panels
+6. **Write pytest tests** in `tests/test_agent.py` — happy path (all three tools execute), no-results branch (search fails, halt), empty wardrobe (still proceeds with fallback)
+7. **Run `pytest tests/test_agent.py`** and confirm branching and state flow
+
+**Checkpoint:** A complete query from the Complete Interaction example flows through all three tools with state visibly passing between them. Agent behavior differs when search_listings returns empty vs. results. Print session dict and confirm all keys (user_query, search_criteria, current_item, outfit_suggestion, fit_card, error_log) are populated correctly.
 
 ---
 
