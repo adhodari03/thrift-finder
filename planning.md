@@ -138,12 +138,21 @@ Write out what a full user interaction looks like from start to finish — tool 
 
 **Step 1:**
 <!-- What does the agent do first? Which tool is called? With what input? -->
-
+The agent extracts the user's style requirements and budget constraints, then executes search_listings(description="vintage graphic tee", size=None, max_price=30.0). Assuming it finds a match, the agent selects the most relevant top result (e.g., "Faded 90s Rock Tee — $25, Depop, Good condition").
+(Note: If the tool returns an empty list, the agent halts execution, alerts the user, and prompts them to broaden their search limits, skipping Steps 2 and 3)
 **Step 2:**
 <!-- What happens next? What was returned from step 1? What tool is called now? -->
-
+The agent integrates the successfully sourced item with the user's provided closet context, calling suggest_outfit(new_item=<Faded 90s Rock Tee>, wardrobe=["baggy jeans", "chunky sneakers"]). The tool analyzes the combination and generates concrete styling advice, such as: "Tuck the vintage tee loosely into your baggy jeans and let the chunky sneakers ground the outfit for an effortless, oversized streetwear silhouette."
+(Note: If the user had not mentioned their jeans and sneakers, the agent would pass an empty wardrobe and the tool would recommend standalone pairings)
 **Step 3:**
 <!-- Continue until the full interaction is complete -->
-
+The agent takes the newly formed outfit concept and passes it to the final tool by executing create_fit_card(outfit=<Step 2 suggestion>, new_item=<Faded 90s Rock Tee>). The tool translates the outfit's vibe and crafts a snappy, shareable social media caption. Different inputs lead to different captions. 
 **Final output to user:**
 <!-- What does the user actually see at the end? -->
+The agent synthesizes the outputs from all three successful tool calls and presents the final, polished recommendation to the user:
+
+"I tracked down a great option for you: a Faded 90s Rock Tee for $25 on Depop.
+
+How to wear it: Tuck the vintage tee loosely into your baggy jeans and let the chunky sneakers ground the outfit for an effortless, oversized streetwear silhouette.
+
+Your shareable fit card: 'scored this perfect vintage rock tee on depop for $25 and it pairs flawlessly with my baggy denim rotation 🛹✨ full fit check in stories.
