@@ -17,6 +17,7 @@ You must have at least 3 tools. The three required tools are listed — add any 
 **What it does:**
 <!-- Describe what this tool does in 1–2 sentences -->
 Searches a mock clothing marketplace dataset to find items that match a user’s preferences. The tool accepts a text description (such as “black oversized hoodie” or “formal white sneakers”), a clothing size, and a maximum budget. It filters listings based on relevance, size compatibility, and price constraints, then returns a list of matching items with details like title, brand, price, condition, platform. If no suitable matches are found, the tool returns a friendly fallback response suggesting broader search criteria or alternative recommendations.
+
 **Input parameters:**
 <!-- List each parameter, its type, and what it represents -->
 - `description` (str): keywords or item description
@@ -26,8 +27,10 @@ Searches a mock clothing marketplace dataset to find items that match a user’s
 **What it returns:**
 <!-- Describe the return value — what fields does a result contain? -->
 A list of matching marketplace items. Results may contain Item title, Brand name, Size, Price, Condition, Marketplace platform, Description
+
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if no listings match? -->
+
 If no matching listings are found, the agent broadens the search criteria by relaxing filters such as price or keywords. The tool then returns a friendly fallback response with alternative suggestions or nearby matches. 
 ---
 
@@ -36,6 +39,7 @@ If no matching listings are found, the agent broadens the search criteria by rel
 **What it does:**
 <!-- Describe what this tool does in 1–2 sentences -->
 Generates complete outfit recommendations by combining a newly selected clothing item with pieces from the user’s wardrobe. The tool analyzes color coordination, clothing categories, and style compatibility to create balanced outfit combinations for different occasions.
+
 **Input parameters:**
 <!-- List each parameter, its type, and what it represents -->
 - `new_item` (dict): Information about the selected clothing item, including category, color, style, and brand
@@ -51,6 +55,7 @@ A short explanation describing why the outfit works together
 
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if the wardrobe is empty or no outfit can be suggested? -->
+
 If the wardrobe is empty or too limited, the agent recommends essential complementary items that would pair well with the selected item. The tool still returns a basic outfit suggestion instead of failing completely.
 ---
 
@@ -75,6 +80,7 @@ A concise and creative outfit summary
 No marketing vibes or overselling caption
 **What happens if it fails or returns nothing:**
 <!-- What should the agent do if the outfit data is incomplete? -->
+
 If the outfit data is incomplete, the agent generates a simplified fit card using the available clothing details and adds a generic styling description instead of returning an empty response.
 ---
 
@@ -376,3 +382,4 @@ The agent synthesizes the outputs from all three successful tool calls and prese
 How to wear it: Tuck the vintage tee loosely into your baggy jeans and let the chunky sneakers ground the outfit for an effortless, oversized streetwear silhouette.
 
 Your shareable fit card: 'scored this perfect vintage rock tee on depop for $25 and it pairs flawlessly with my baggy denim rotation 🛹✨ full fit check in stories.'
+

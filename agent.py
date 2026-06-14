@@ -18,6 +18,8 @@ Usage (once implemented):
     print(result["error"])   # None on success
 """
 
+import re
+
 from tools import search_listings, suggest_outfit, create_fit_card
 
 
@@ -43,6 +45,55 @@ def _new_session(query: str, wardrobe: dict) -> dict:
         "fit_card": None,            # string returned by create_fit_card
         "error": None,               # set if the interaction ended early
     }
+
+
+# ── query parser ─────────────────────────────────────────────────────────────
+
+def _parse_query(query: str) -> dict:
+    """
+    Extract description, size, and max_price from a natural language query
+    using regex. Falls back gracefully if a field is not found.
+
+    Examples:
+        "vintage graphic tee under $30, size M"
+        → {"description": "vintage graphic tee", "size": "M", "max_price": 30.0}
+
+        "designer ballgown size XXS under $5"
+        → {"description": "designer ballgown", "size": "XXS", "max_price": 5.0}
+    """
+    # --- max_price ---
+    price_match = re.search(
+        r'(?:under|below|max|up\s+to|less\s+than|within)?\s*\$(\d+(?:\.\d+)?)',
+        query, re.IGNORECASE,
+    )
+    max_price = float(price_match.group(1)) if price_match else None
+
+    # --- size ---
+    size_match = re.search(
+        r'\b(?:size\s+)?(XXS|XS|S/M|L/XL|XXL|2XL|3XL|XL|[SML])\b',
+        query, re.IGNORECASE,
+    )
+    size = size_match.group(1).upper() if size_match else None
+
+    # --- description: remove price and size phrases, then clean up ---
+    desc = query
+    desc = re.sub(
+        r'(?:under|below|max|up\s+to|less\s+than|within)\s*\$\d+(?:\.\d+)?',
+        '', desc, flags=re.IGNORECASE,
+    )
+    desc = re.sub(r'\$\d+(?:\.\d+)?', '', desc)
+    desc = re.sub(
+        r'\b(?:size\s+)?(?:XXS|XS|S/M|L/XL|XXL|2XL|3XL|XL|[SML])\b',
+        '', desc, flags=re.IGNORECASE,
+    )
+    desc = re.sub(r'[,;]+', ' ', desc)
+    desc = ' '.join(desc.split()).strip()
+
+    # Fall back to the full query if stripping removed everything
+    if not desc:
+        desc = query.strip()
+
+    return {"description": desc, "size": size, "max_price": max_price}
 
 
 # ── planning loop ─────────────────────────────────────────────────────────────
@@ -92,9 +143,47 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     Before writing code, complete the Planning Loop and State Management sections
     of planning.md — your implementation should match what you described there.
     """
-    # TODO: implement the planning loop
+    # Step 1: initialize session
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
+
+    # Step 2: parse the query into structured search parameters
+    session["parsed"] = _parse_query(query)
+    parsed = session["parsed"]
+
+    # Step 3: search for matching listings — BRANCH point
+    session["search_results"] = search_listings(
+        description=parsed["description"],
+        size=parsed["size"],
+        max_price=parsed["max_price"],
+    )
+
+    if not session["search_results"]:
+        # Halt: do NOT call suggest_outfit or create_fit_card on empty input
+        desc = parsed["description"]
+        budget = f"${parsed['max_price']}" if parsed["max_price"] is not None else "any budget"
+        size_hint = f", size {parsed['size']}" if parsed["size"] else ""
+        session["error"] = (
+            f"No listings found for \"{desc}\"{size_hint} under {budget}. "
+            "Try broadening your search — adjust the price ceiling, size, or keywords."
+        )
+        return session
+
+    # Step 4: select the top-ranked result
+    session["selected_item"] = session["search_results"][0]
+
+    # Step 5: suggest an outfit using the selected item and user's wardrobe
+    session["outfit_suggestion"] = suggest_outfit(
+        new_item=session["selected_item"],
+        wardrobe=session["wardrobe"],
+    )
+
+    # Step 6: generate the fit card caption
+    session["fit_card"] = create_fit_card(
+        outfit=session["outfit_suggestion"],
+        new_item=session["selected_item"],
+    )
+
+    # Step 7: return the completed session
     return session
 
 
